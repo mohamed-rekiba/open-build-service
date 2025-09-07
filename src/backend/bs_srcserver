@@ -1939,8 +1939,15 @@ sub getprojpack {
 	      next;
 	    }
 	    if (!defined($d->{'name'})) {
-	      $rinfo->{'error'} = "can not parse name from $file";
-	      next;
+	      # Try to extract name from filename as fallback
+	      my $fallback_name = extract_name_from_filename($file);
+	      if (defined($fallback_name)) {
+	        $d->{'name'} = $fallback_name;
+	        print "using filename '$file' as package name '$fallback_name'\n";
+	      } else {
+	        $rinfo->{'error'} = "can not parse name from $file";
+	        next;
+	      }
 	    }
 	    if ($repo->{'crosshostarch'}) {
 	      if ($repo->{'crosshostarch'} eq $arch && !$d->{'nativebuild'}) {
@@ -5684,6 +5691,38 @@ sub binary_key_to_type {
   return ();
 }
 
+# Extract package name from recipe filename as fallback
+sub extract_name_from_filename {
+  my ($filename) = @_;
+  return undef unless defined $filename;
+  
+  # Get basename without path
+  my $basename = $filename;
+  $basename =~ s/.*\///;
+  
+  # Extract name from different recipe types
+  my $name;
+  if ($basename =~ /^(.+)\.spec$/) {
+    $name = $1;
+  } elsif ($basename =~ /^(.+)\.dsc$/) {
+    $name = $1;
+  } elsif ($basename =~ /^(.+)\.kiwi$/) {
+    $name = $1;
+  } elsif ($basename =~ /^(.+)\.dockerfile$/i) {
+    $name = $1;
+  } else {
+    # For other types, remove common extensions
+    $name = $basename;
+    $name =~ s/\.[^.]+$//;  # Remove last extension
+  }
+  
+  # Validate package name (basic validation)
+  return undef unless defined $name && length($name) > 0;
+  return undef if $name =~ /[\/\s]/;  # No slashes or spaces
+  
+  return $name;
+}
+
 sub binary_key_to_data {
   my ($db, $key) = @_;
   my @p = split('/', $key);
@@ -6930,6 +6969,14 @@ sub sourceinfo_parse {
     $d ||= { 'error' => 'parse error' };
     for (qw{name version release subpacks deps prereqs exclarch badarch error}) {
       $r->{$_} = $d->{$_} if defined $d->{$_};
+    }
+    # Add fallback for missing package name
+    if (!defined($r->{'name'}) && !$r->{'error'}) {
+      my $fallback_name = extract_name_from_filename($recipe);
+      if (defined($fallback_name)) {
+        $r->{'name'} = $fallback_name;
+        print "using filename '$recipe' as package name '$fallback_name'\n";
+      }
     }
   }
   if ($servicefn) {

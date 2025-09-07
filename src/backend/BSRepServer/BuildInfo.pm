@@ -247,6 +247,38 @@ sub parse_recipe_includecallback {
   return readstr($fn);
 }
 
+# Extract package name from recipe filename as fallback
+sub extract_name_from_filename {
+  my ($filename) = @_;
+  return undef unless defined $filename;
+
+  # Get basename without path
+  my $basename = $filename;
+  $basename =~ s/.*\///;
+
+  # Extract name from different recipe types
+  my $name;
+  if ($basename =~ /^(.+)\.spec$/) {
+    $name = $1;
+  } elsif ($basename =~ /^(.+)\.dsc$/) {
+    $name = $1;
+  } elsif ($basename =~ /^(.+)\.kiwi$/) {
+    $name = $1;
+  } elsif ($basename =~ /^(.+)\.dockerfile$/i) {
+    $name = $1;
+  } else {
+    # For other types, remove common extensions
+    $name = $basename;
+    $name =~ s/\.[^.]+$//;  # Remove last extension
+  }
+
+  # Validate package name (basic validation)
+  return undef unless defined $name && length($name) > 0;
+  return undef if $name =~ /[\/\s]/;  # No slashes or spaces
+
+  return $name;
+}
+
 # this is similar to the getprojpack code in bs_srcserver
 sub parse_recipe {
   my ($bconf, $recipefile, $files) = @_;
@@ -255,7 +287,17 @@ sub parse_recipe {
   my $d = Build::parse_typed($bconf, $recipefile, $type);
   die("unknown repository type $type\n") unless $d;
   die("could not parse build description ($type): $d->{'error'}\n") if $d->{'error'};
-  die("could not parse name in build description ($type)\n") unless defined $d->{'name'};
+
+  # Try fallback for missing package name
+  if (!defined($d->{'name'})) {
+    my $fallback_name = extract_name_from_filename($recipefile);
+    if (defined($fallback_name)) {
+      $d->{'name'} = $fallback_name;
+      print "using filename '$recipefile' as package name '$fallback_name'\n";
+    } else {
+      die("could not parse name in build description ($type)\n");
+    }
+  }
 
   # build info from parsed data
   my $info = { 'name' => $d->{'name'}, 'dep' => $d->{'deps'} };
